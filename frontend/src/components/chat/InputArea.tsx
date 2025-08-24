@@ -7,7 +7,8 @@ import { useChatStore, useCurrentConversation } from '@/store/chatStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { Button } from '@/components/ui/button'
 import ModelSelector from '@/components/ui/ModelSelector'
-import ThinkingModeToggle from '@/components/ui/ThinkingModeToggle'
+import ThinkingBudgetButton from '@/components/ui/ThinkingBudgetButton'
+import { ThinkingBudget } from '@/lib/types'
 import toast from 'react-hot-toast'
 
 interface InputAreaProps {
@@ -52,6 +53,7 @@ export default function InputArea({ isWelcomeMode = false, onModelMarketClick }:
   const [isRecording, setIsRecording] = useState(false)
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [audioChunks, setAudioChunks] = useState<Blob[]>([])
+  const [thinkingBudget, setThinkingBudget] = useState<ThinkingBudget>('medium')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
@@ -82,11 +84,25 @@ export default function InputArea({ isWelcomeMode = false, onModelMarketClick }:
     return false
   }
 
-  // 自动调整文本框高度
+  // 自动调整文本框高度，限制最大高度（统一两种模式）
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
+      const scrollHeight = textareaRef.current.scrollHeight
+      
+      // 统一计算最大高度：基础高度 + 8行内容
+      const baseHeight = 56 // 基础最小高度
+      const lineHeight = 24 // 每行大约24px（统一行高）
+      const maxLines = 8 // 最多显示8行
+      const maxHeight = baseHeight + (lineHeight * (maxLines - 1))
+      
+      if (scrollHeight <= maxHeight) {
+        textareaRef.current.style.height = scrollHeight + 'px'
+        textareaRef.current.style.overflowY = 'hidden'
+      } else {
+        textareaRef.current.style.height = maxHeight + 'px'
+        textareaRef.current.style.overflowY = 'auto'
+      }
     }
   }, [input])
 
@@ -225,38 +241,180 @@ const handleSubmit = async (e: React.FormEvent) => {
     return (
       <div className="w-full">
         <form onSubmit={handleSubmit} className="relative">
-          {/* 主输入框容器 - 带动画过渡 */}
-          <div className={`relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-3xl shadow-lg hover:shadow-xl transition-all duration-300 ${
-            hasAttachments ? 'pb-16' : ''
-          }`}>
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="询问任何问题..."
-              className="w-full resize-none border-none rounded-3xl px-6 py-4 pl-14 pr-20 bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none text-base leading-6"
-              rows={1}
-              disabled={isLoading}
-              style={{ minHeight: '56px' }}
-            />
+          {/* 两行一体式容器 - 固定宽度作为默认形态 */}
+          <div className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-3xl shadow-lg hover:shadow-xl transition-all duration-300 max-w-[min(1100px,90vw)] mx-auto">
+            
+            {/* 第一行：输入框 */}
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="询问任何问题..."
+                className="w-full resize-none border-none rounded-none px-6 py-4 bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none text-base leading-6"
+                rows={1}
+                disabled={isLoading}
+                style={{ minHeight: '56px', lineHeight: '24px' }}
+              />
+            </div>
 
-            {/* 附加内容显示区域 - 在输入框内部 */}
-            {hasAttachments && (
-              <div className="absolute bottom-0 left-0 right-0 px-6 pb-4 border-t border-gray-100 dark:border-gray-700">
-                <div className="flex flex-wrap gap-2 pt-3">
+            {/* 第二行：按钮组 + 工具 Chips + 右侧操作按钮 */}
+            <div className="relative flex items-center gap-2 px-6 py-3 min-h-[56px]">
+              {/* 左侧：按钮组 */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowTools(!showTools)}
+                    className={`p-2 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${
+                      showTools
+                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
+                        : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                    }`}
+                    title="添加内容和工具"
+                  >
+                    <PlusIcon className="w-5 h-5" />
+                  </button>
+
+                  {/* 工具下拉菜单 */}
+                  {showTools && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-10 animate-in fade-in-0 duration-200" 
+                        onClick={() => setShowTools(false)}
+                      />
+                      <div className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-30 animate-in fade-in-0 slide-in-from-bottom-2 duration-200">
+                        <div className="p-3">
+                          {/* 添加照片和文件部分 */}
+                          <div className="mb-3 animate-in fade-in-0 slide-in-from-left-1 duration-300 delay-75">
+                            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
+                              添加照片和文件
+                            </div>
+                            
+                            <button
+                              type="button"
+                              onClick={triggerImageUpload}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <PhotoIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">添加照片</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  上传图片文件
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={triggerFileUpload}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <PaperClipIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">添加文件</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  上传其他文件
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={connectGoogleDrive}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <FolderIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">从Google Drive中添加</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  从Google Drive选择文件
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={connectOneDrive}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <FolderIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">从OneDrive中添加</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  从OneDrive选择文件
+                                </div>
+                              </div>
+                            </button>
+                          </div>
+
+                          {/* 分隔线 */}
+                          <div className="border-t border-gray-200 dark:border-gray-600 my-3"></div>
+
+                          {/* 工具部分 */}
+                          <div className="animate-in fade-in-0 slide-in-from-left-1 duration-300 delay-150">
+                            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
+                              工具
+                            </div>
+                            {availableTools.map((tool) => {
+                              const isSelected = selectedTools.some(t => t.id === tool.id)
+                              return (
+                                <button
+                                  key={tool.id}
+                                  type="button"
+                                  onClick={() => toggleTool(tool)}
+                                  className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 ${
+                                    isSelected 
+                                      ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 scale-[1.02]' 
+                                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1'
+                                  }`}
+                                >
+                                  <tool.icon className="w-5 h-5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-sm">{tool.name}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                      {tool.description}
+                                    </div>
+                                  </div>
+                                  {isSelected && (
+                                    <CheckIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                  )}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                
+                {/* 思考预算按钮 - 仅在思考模式启用时显示 */}
+                {showThinkingToggle() && (
+                  <ThinkingBudgetButton
+                    budget={thinkingBudget}
+                    onChange={setThinkingBudget}
+                  />
+                )}
+              </div>
+
+              {/* 中间：工具 Chips - flex换行处理溢出 */}
+              {hasAttachments && (
+                <div className="flex flex-wrap gap-2 flex-1 min-w-0 animate-in fade-in-0 slide-in-from-top-2 duration-300">
                   {/* 显示附加的文件 */}
-                  {attachedFiles.map((file) => (
+                  {attachedFiles.map((file, index) => (
                     <div
                       key={file.id}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-sm border"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-sm border animate-in fade-in-0 slide-in-from-left-2 duration-200 hover:scale-105 transition-all"
+                      style={{ animationDelay: `${index * 50}ms` }}
                     >
                       <PaperClipIcon className="w-4 h-4" />
                       <span className="truncate max-w-32">{file.name}</span>
                       <button
                         type="button"
                         onClick={() => removeFile(file.id)}
-                        className="hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full p-0.5"
+                        className="hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full p-0.5 transition-all duration-200 hover:scale-110 hover:rotate-90"
                       >
                         <XMarkIcon className="w-3 h-3" />
                       </button>
@@ -264,200 +422,71 @@ const handleSubmit = async (e: React.FormEvent) => {
                   ))}
                   
                   {/* 显示附加的工具 */}
-                  {selectedTools.map((tool) => (
+                  {selectedTools.map((tool, index) => (
                     <div
                       key={tool.id}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 rounded-full text-sm border border-blue-200 dark:border-blue-800"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 rounded-full text-sm border border-blue-200 dark:border-blue-800 animate-in fade-in-0 slide-in-from-left-2 duration-200 hover:scale-105 transition-all"
+                      style={{ animationDelay: `${(attachedFiles.length + index) * 50}ms` }}
                     >
                       <tool.icon className="w-4 h-4" />
                       <span>{tool.name}</span>
                       <button
                         type="button"
                         onClick={() => removeTool(tool.id)}
-                        className="hover:bg-blue-200 dark:hover:bg-blue-800 rounded-full p-0.5"
+                        className="hover:bg-blue-200 dark:hover:bg-blue-800 rounded-full p-0.5 transition-all duration-200 hover:scale-110 hover:rotate-90"
                       >
                         <XMarkIcon className="w-3 h-3" />
                       </button>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-            
-            {/* 左侧加号按钮 */}
-            <div className="absolute left-4 top-4">
-              <div className="relative">
+              )}
+              
+              {/* 右侧操作按钮 - 绝对定位在右下角 */}
+              <div className="absolute bottom-3 right-3 flex items-center gap-2 z-10">
+                {/* 语音按钮 */}
                 <button
                   type="button"
-                  onClick={() => setShowTools(!showTools)}
-                  className={`p-2 rounded-full transition-colors ${
-                    showTools
-                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
-                      : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`p-2 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${
+                    isRecording 
+                      ? 'bg-red-500 text-white animate-pulse hover:bg-red-600' 
+                      : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                   }`}
-                  title="添加内容和工具"
+                  title={isRecording ? '停止录音' : '开始录音'}
                 >
-                  <PlusIcon className="w-5 h-5" />
+                  {isRecording ? (
+                    <StopIcon className="w-4 h-4 transition-transform duration-200" />
+                  ) : (
+                    <MicrophoneIcon className="w-4 h-4 transition-transform duration-200 hover:scale-110" />
+                  )}
                 </button>
 
-                {/* 工具下拉菜单 */}
-                {showTools && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-10" 
-                      onClick={() => setShowTools(false)}
-                    />
-                    <div className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20">
-                      <div className="p-3">
-                        {/* 添加照片和文件部分 */}
-                        <div className="mb-3">
-                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
-                            添加照片和文件
-                          </div>
-                          
-                          <button
-                            type="button"
-                            onClick={triggerImageUpload}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <PhotoIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">添加照片</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                上传图片文件
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={triggerFileUpload}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <PaperClipIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">添加文件</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                上传其他文件
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={connectGoogleDrive}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <FolderIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">从Google Drive中添加</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                从Google Drive选择文件
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={connectOneDrive}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <FolderIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">从OneDrive中添加</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                从OneDrive选择文件
-                              </div>
-                            </div>
-                          </button>
-                        </div>
-
-                        {/* 分隔线 */}
-                        <div className="border-t border-gray-200 dark:border-gray-600 my-3"></div>
-
-                        {/* 工具部分 */}
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
-                            工具
-                          </div>
-                          {availableTools.map((tool) => {
-                            const isSelected = selectedTools.some(t => t.id === tool.id)
-                            return (
-                              <button
-                                key={tool.id}
-                                type="button"
-                                onClick={() => toggleTool(tool)}
-                                className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors ${
-                                  isSelected 
-                                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
-                                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                                }`}
-                              >
-                                <tool.icon className="w-5 h-5 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-sm">{tool.name}</div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                    {tool.description}
-                                  </div>
-                                </div>
-                                {isSelected && (
-                                  <CheckIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                                )}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </>
+                {/* 发送按钮 */}
+                {isLoading ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled
+                    className="px-4 py-3 bg-gray-300 cursor-not-allowed rounded-full opacity-50"
+                  >
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={!input.trim()}
+                    className={`px-4 py-3 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${
+                      input.trim() 
+                        ? 'bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 hover:shadow-lg' 
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed opacity-50'
+                    }`}
+                  >
+                    <PaperAirplaneIcon className="w-4 h-4 transition-transform duration-200 hover:translate-x-0.5" />
+                  </Button>
                 )}
               </div>
-            </div>
-
-            {/* 右侧按钮组 */}
-            <div className="absolute right-4 top-4 flex items-center gap-2">
-              {/* 语音按钮 */}
-              <button
-                type="button"
-                onClick={isRecording ? stopRecording : startRecording}
-                className={`p-2 rounded-full transition-colors ${
-                  isRecording 
-                    ? 'bg-red-500 text-white animate-pulse' 
-                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-                }`}
-                title={isRecording ? '停止录音' : '开始录音'}
-              >
-                {isRecording ? (
-                  <StopIcon className="w-4 h-4" />
-                ) : (
-                  <MicrophoneIcon className="w-4 h-4" />
-                )}
-              </button>
-
-              {/* 发送按钮 */}
-              {isLoading ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled
-                  className="px-4 py-3 bg-gray-300 cursor-not-allowed rounded-full"
-                >
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={!input.trim()}
-                  className={`px-4 py-3 rounded-full transition-colors ${
-                    input.trim() 
-                      ? 'bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200' 
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  <PaperAirplaneIcon className="w-4 h-4" />
-                </Button>
-              )}
             </div>
           </div>
 
@@ -477,58 +506,190 @@ const handleSubmit = async (e: React.FormEvent) => {
               onModelMarketClick={onModelMarketClick} 
               showDetailedInfo={false} // 欢迎模式下不显示详细信息
             />
-            {/* GPT-5 Thinking模式切换 */}
-            {showThinkingToggle() && (
-              <ThinkingModeToggle
-                enabled={settings.thinkingMode || false}
-                onChange={(enabled) => updateSettings({ thinkingMode: enabled })}
-              />
-            )}
-          <div className="text-xs text-gray-500 dark:text-gray-400">
-            {settings.thinkingMode && showThinkingToggle() && 'GPT-5 思考模式已启用'}
-          </div>
         </div>
       </div>
     )
   }
 
-  // 原有的底部输入框样式（对话模式）
+  // 对话模式输入框样式（与欢迎页保持一致）
   return (
-    <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      <div className="max-w-3xl mx-auto px-4 py-4">
+    <div className="bg-white dark:bg-gray-900 py-4">
+      <div className="max-w-[min(1100px,90vw)] mx-auto px-4">
         <form onSubmit={handleSubmit} className="relative">
-          {/* 主输入框容器 - 带动画过渡 */}
-          <div className={`relative bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl shadow-sm transition-all duration-300 ${
-            hasAttachments ? 'pb-14' : ''
-          }`}>
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="询问任何问题..."
-              className="w-full resize-none border-none rounded-2xl px-4 py-3 pl-12 pr-16 bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none text-sm"
-              rows={1}
-              disabled={isLoading}
-              style={{ minHeight: '48px' }}
-            />
+          {/* 两行一体式容器 - 与欢迎页样式保持一致 */}
+          <div className="relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-3xl shadow-lg hover:shadow-xl transition-all duration-300">
+            
+            {/* 第一行：输入框 */}
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="询问任何问题..."
+                className="w-full resize-none border-none rounded-none px-6 py-4 bg-transparent text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none text-base leading-6"
+                rows={1}
+                disabled={isLoading}
+                style={{ minHeight: '56px', lineHeight: '24px' }}
+              />
+            </div>
 
-            {/* 附加内容显示区域 - 在输入框内部 */}
-            {hasAttachments && (
-              <div className="absolute bottom-0 left-0 right-0 px-4 pb-3 border-t border-gray-100 dark:border-gray-700">
-                <div className="flex flex-wrap gap-2 pt-3">
+            {/* 第二行：按钮组 + 工具 Chips + 右侧操作按钮 */}
+            <div className="relative flex items-center gap-2 px-6 py-3 min-h-[56px]">
+              {/* 左侧：按钮组 */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowTools(!showTools)}
+                    className={`p-2 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${
+                      showTools
+                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
+                        : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                    }`}
+                    title="添加内容和工具"
+                  >
+                    <PlusIcon className="w-5 h-5" />
+                  </button>
+
+                  {/* 工具下拉菜单 */}
+                  {showTools && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-10 animate-in fade-in-0 duration-200" 
+                        onClick={() => setShowTools(false)}
+                      />
+                      <div className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-30 animate-in fade-in-0 slide-in-from-bottom-2 duration-200">
+                        <div className="p-3">
+                          {/* 添加照片和文件部分 */}
+                          <div className="mb-3 animate-in fade-in-0 slide-in-from-left-1 duration-300 delay-75">
+                            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
+                              添加照片和文件
+                            </div>
+                            
+                            <button
+                              type="button"
+                              onClick={triggerImageUpload}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <PhotoIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">添加照片</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  上传图片文件
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={triggerFileUpload}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <PaperClipIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">添加文件</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  上传其他文件
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={connectGoogleDrive}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <FolderIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">从Google Drive中添加</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  从Google Drive选择文件
+                                </div>
+                              </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={connectOneDrive}
+                              className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1"
+                            >
+                              <FolderIcon className="w-5 h-5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">从OneDrive中添加</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                  从OneDrive选择文件
+                                </div>
+                              </div>
+                            </button>
+                          </div>
+
+                          {/* 分隔线 */}
+                          <div className="border-t border-gray-200 dark:border-gray-600 my-3"></div>
+
+                          {/* 工具部分 */}
+                          <div className="animate-in fade-in-0 slide-in-from-left-1 duration-300 delay-150">
+                            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
+                              工具
+                            </div>
+                            {availableTools.map((tool) => {
+                              const isSelected = selectedTools.some(t => t.id === tool.id)
+                              return (
+                                <button
+                                  key={tool.id}
+                                  type="button"
+                                  onClick={() => toggleTool(tool)}
+                                  className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all duration-200 ${
+                                    isSelected 
+                                      ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 scale-[1.02]' 
+                                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 hover:translate-x-1'
+                                  }`}
+                                >
+                                  <tool.icon className="w-5 h-5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-sm">{tool.name}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                      {tool.description}
+                                    </div>
+                                  </div>
+                                  {isSelected && (
+                                    <CheckIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                  )}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                
+                {/* 思考预算按钮 - 仅在思考模式启用时显示 */}
+                {showThinkingToggle() && (
+                  <ThinkingBudgetButton
+                    budget={thinkingBudget}
+                    onChange={setThinkingBudget}
+                  />
+                )}
+              </div>
+
+              {/* 中间：工具 Chips - flex换行处理溢出 */}
+              {hasAttachments && (
+                <div className="flex flex-wrap gap-2 flex-1 min-w-0 animate-in fade-in-0 slide-in-from-top-2 duration-300">
                   {/* 显示附加的文件 */}
-                  {attachedFiles.map((file) => (
+                  {attachedFiles.map((file, index) => (
                     <div
                       key={file.id}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-sm border"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-sm border animate-in fade-in-0 slide-in-from-left-2 duration-200 hover:scale-105 transition-all"
+                      style={{ animationDelay: `${index * 50}ms` }}
                     >
                       <PaperClipIcon className="w-4 h-4" />
                       <span className="truncate max-w-32">{file.name}</span>
                       <button
                         type="button"
                         onClick={() => removeFile(file.id)}
-                        className="hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full p-0.5"
+                        className="hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full p-0.5 transition-all duration-200 hover:scale-110 hover:rotate-90"
                       >
                         <XMarkIcon className="w-3 h-3" />
                       </button>
@@ -536,200 +697,71 @@ const handleSubmit = async (e: React.FormEvent) => {
                   ))}
                   
                   {/* 显示附加的工具 */}
-                  {selectedTools.map((tool) => (
+                  {selectedTools.map((tool, index) => (
                     <div
                       key={tool.id}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 rounded-full text-sm border border-blue-200 dark:border-blue-800"
+                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100 rounded-full text-sm border border-blue-200 dark:border-blue-800 animate-in fade-in-0 slide-in-from-left-2 duration-200 hover:scale-105 transition-all"
+                      style={{ animationDelay: `${(attachedFiles.length + index) * 50}ms` }}
                     >
                       <tool.icon className="w-4 h-4" />
                       <span>{tool.name}</span>
                       <button
                         type="button"
                         onClick={() => removeTool(tool.id)}
-                        className="hover:bg-blue-200 dark:hover:bg-blue-800 rounded-full p-0.5"
+                        className="hover:bg-blue-200 dark:hover:bg-blue-800 rounded-full p-0.5 transition-all duration-200 hover:scale-110 hover:rotate-90"
                       >
                         <XMarkIcon className="w-3 h-3" />
                       </button>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-            
-            {/* 左侧工具按钮 */}
-            <div className="absolute left-2 top-2">
-              <div className="relative">
+              )}
+              
+              {/* 右侧操作按钮 - 绝对定位在右下角 */}
+              <div className="absolute bottom-3 right-3 flex items-center gap-2 z-10">
+                {/* 语音按钮 */}
                 <button
                   type="button"
-                  onClick={() => setShowTools(!showTools)}
-                  className={`p-2 rounded-full transition-colors ${
-                    showTools
-                      ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
-                      : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`p-2 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${
+                    isRecording 
+                      ? 'bg-red-500 text-white animate-pulse hover:bg-red-600' 
+                      : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                   }`}
-                  title="添加内容和工具"
+                  title={isRecording ? '停止录音' : '开始录音'}
                 >
-                  <PlusIcon className="w-4 h-4" />
+                  {isRecording ? (
+                    <StopIcon className="w-4 h-4 transition-transform duration-200" />
+                  ) : (
+                    <MicrophoneIcon className="w-4 h-4 transition-transform duration-200 hover:scale-110" />
+                  )}
                 </button>
 
-                {/* 工具下拉菜单 */}
-                {showTools && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-10" 
-                      onClick={() => setShowTools(false)}
-                    />
-                    <div className="absolute bottom-full left-0 mb-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20">
-                      <div className="p-3">
-                        {/* 添加照片和文件部分 */}
-                        <div className="mb-3">
-                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
-                            添加照片和文件
-                          </div>
-                          
-                          <button
-                            type="button"
-                            onClick={triggerImageUpload}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <PhotoIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">添加照片</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                上传图片文件
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={triggerFileUpload}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <PaperClipIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">添加文件</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                上传其他文件
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={connectGoogleDrive}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <FolderIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">从Google Drive中添加</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                从Google Drive选择文件
-                              </div>
-                            </div>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={connectOneDrive}
-                            className="w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                          >
-                            <FolderIcon className="w-5 h-5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm">从OneDrive中添加</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                从OneDrive选择文件
-                              </div>
-                            </div>
-                          </button>
-                        </div>
-
-                        {/* 分隔线 */}
-                        <div className="border-t border-gray-200 dark:border-gray-600 my-3"></div>
-
-                        {/* 工具部分 */}
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 px-2">
-                            工具
-                          </div>
-                          {availableTools.map((tool) => {
-                            const isSelected = selectedTools.some(t => t.id === tool.id)
-                            return (
-                              <button
-                                key={tool.id}
-                                type="button"
-                                onClick={() => toggleTool(tool)}
-                                className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors ${
-                                  isSelected 
-                                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-100' 
-                                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                                }`}
-                              >
-                                <tool.icon className="w-5 h-5 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-sm">{tool.name}</div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                    {tool.description}
-                                  </div>
-                                </div>
-                                {isSelected && (
-                                  <CheckIcon className="w-4 h-4 text-blue-600 flex-shrink-0" />
-                                )}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </>
+                {/* 发送按钮 */}
+                {isLoading ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled
+                    className="px-4 py-3 bg-gray-300 cursor-not-allowed rounded-full opacity-50"
+                  >
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={!input.trim()}
+                    className={`px-4 py-3 rounded-full transition-all duration-200 hover:scale-110 active:scale-95 ${
+                      input.trim() 
+                        ? 'bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 hover:shadow-lg' 
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed opacity-50'
+                    }`}
+                  >
+                    <PaperAirplaneIcon className="w-4 h-4 transition-transform duration-200 hover:translate-x-0.5" />
+                  </Button>
                 )}
               </div>
-            </div>
-
-            {/* 右侧按钮组 */}
-            <div className="absolute right-3 top-3 flex items-center gap-2">
-              {/* 语音按钮 */}
-              <button
-                type="button"
-                onClick={isRecording ? stopRecording : startRecording}
-                className={`p-2 rounded-full transition-colors ${
-                  isRecording 
-                    ? 'bg-red-500 text-white animate-pulse' 
-                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-                }`}
-                title={isRecording ? '停止录音' : '开始录音'}
-              >
-                {isRecording ? (
-                  <StopIcon className="w-4 h-4" />
-                ) : (
-                  <MicrophoneIcon className="w-4 h-4" />
-                )}
-              </button>
-
-              {/* 发送按钮 */}
-              {isLoading ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled
-                  className="px-4 py-3 bg-gray-300 cursor-not-allowed"
-                >
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={!input.trim()}
-                  className={`px-4 py-3 rounded-full transition-colors ${
-                    input.trim() 
-                      ? 'bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200' 
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                  }`}
-                >
-                  <PaperAirplaneIcon className="w-4 h-4" />
-                </Button>
-              )}
             </div>
           </div>
 
@@ -746,13 +778,6 @@ const handleSubmit = async (e: React.FormEvent) => {
         {/* 当前模型显示 */}
         <div className="mt-2 flex items-center justify-center gap-4">
           <ModelSelector onModelMarketClick={onModelMarketClick} />
-          {/* GPT-5 Thinking模式切换 */}
-          {showThinkingToggle() && (
-            <ThinkingModeToggle
-              enabled={settings.thinkingMode || false}
-              onChange={(enabled) => updateSettings({ thinkingMode: enabled })}
-            />
-          )}
         </div>
       </div>
     </div>
