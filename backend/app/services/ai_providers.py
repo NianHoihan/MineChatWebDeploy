@@ -28,7 +28,7 @@ class AIProviderService:
             return getattr(msg, attr, "")
     
     def _convert_message_to_openai_format(self, msg: Union[Dict[str, Any], Any]) -> Dict[str, Any]:
-        """将消息转换为OpenAI API格式，支持图片附件"""
+        """将消息转换为OpenAI API格式，支持图片和文件附件"""
         role = self._get_message_attr(msg, "role")
         content = self._get_message_attr(msg, "content")
         
@@ -39,11 +39,21 @@ class AIProviderService:
         else:
             images = getattr(msg, "images", None)
         
-        # 如果没有图片，使用传统格式
-        if not images or len(images) == 0:
+        # 获取文件数据
+        files = None
+        if isinstance(msg, dict):
+            files = msg.get("files")
+        else:
+            files = getattr(msg, "files", None)
+        
+        # 检查是否有多媒体内容
+        has_multimedia = (images and len(images) > 0) or (files and len(files) > 0)
+        
+        # 如果没有多媒体内容，使用传统格式
+        if not has_multimedia:
             return {"role": role, "content": content}
         
-        # 构造支持图片的消息格式
+        # 构造支持多媒体的消息格式
         content_parts = []
         
         # 添加文本内容（如果有）
@@ -51,26 +61,96 @@ class AIProviderService:
             content_parts.append({"type": "text", "text": content})
         
         # 添加图片内容
-        for image in images:
-            if isinstance(image, dict):
-                image_data = image.get("data")
-                mime_type = image.get("mime_type", "image/jpeg")
-            else:
-                image_data = getattr(image, "data", "")
-                mime_type = getattr(image, "mime_type", "image/jpeg")
-            
-            if image_data:
-                content_parts.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{mime_type};base64,{image_data}"
-                    }
-                })
+        if images:
+            for image in images:
+                if isinstance(image, dict):
+                    image_data = image.get("data")
+                    mime_type = image.get("mime_type", "image/jpeg")
+                else:
+                    image_data = getattr(image, "data", "")
+                    mime_type = getattr(image, "mime_type", "image/jpeg")
+                
+                if image_data:
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{image_data}"
+                        }
+                    })
+        
+        # 添加文件内容 (使用input_file格式)
+        if files:
+            for file in files:
+                if isinstance(file, dict):
+                    file_id = file.get("openai_file_id")
+                    filename = file.get("filename")
+                    process_mode = file.get("process_mode", "direct")
+                else:
+                    file_id = getattr(file, "openai_file_id", "")
+                    filename = getattr(file, "filename", "")
+                    process_mode = getattr(file, "process_mode", "direct")
+                
+                if file_id:
+                    # 根据处理模式决定如何处理文件
+                    if process_mode == "direct":
+                        # 直读模式：使用 input_file
+                        content_parts.append({
+                            "type": "input_file",
+                            "file_id": file_id
+                        })
+                    # Code Interpreter 和 File Search 模式的文件会在工具配置中处理
         
         return {
             "role": role,
             "content": content_parts
         }
+    
+    def _prepare_tools_config(self, messages: List[Union[Dict[str, Any], Any]]) -> Dict[str, Any]:
+        """准备工具配置，基于消息中的文件类型"""
+        tools_config = {"tools": []}
+        
+        # 收集所有需要的工具
+        need_code_interpreter = False
+        need_file_search = False
+        vector_stores = set()
+        
+        for msg in messages:
+            # 获取文件数据
+            files = None
+            if isinstance(msg, dict):
+                files = msg.get("files")
+            else:
+                files = getattr(msg, "files", None)
+            
+            if files:
+                for file in files:
+                    if isinstance(file, dict):
+                        process_mode = file.get("process_mode", "direct")
+                        vector_store_id = file.get("vector_store_id")
+                    else:
+                        process_mode = getattr(file, "process_mode", "direct")
+                        vector_store_id = getattr(file, "vector_store_id", None)
+                    
+                    if process_mode == "code_interpreter":
+                        need_code_interpreter = True
+                    elif process_mode == "file_search" and vector_store_id:
+                        need_file_search = True
+                        vector_stores.add(vector_store_id)
+        
+        # 添加需要的工具
+        if need_code_interpreter:
+            tools_config["tools"].append({
+                "type": "code_interpreter",
+                "container": {"type": "auto"}
+            })
+        
+        if need_file_search and vector_stores:
+            tools_config["tools"].append({
+                "type": "file_search",
+                "vector_store_ids": list(vector_stores)
+            })
+        
+        return tools_config
         
     async def _load_models_config(self) -> Dict[str, Any]:
         """加载模型配置"""
@@ -280,8 +360,11 @@ class AIProviderService:
             
             logger.info(f"调用OpenAI模型: {model}, 消息数量: {len(messages)}")
             
-            # 转换消息格式以支持图片
+            # 转换消息格式以支持图片和文件
             converted_messages = [self._convert_message_to_openai_format(msg) for msg in messages]
+            
+            # 准备工具配置
+            tools_config = self._prepare_tools_config(messages)
             
             # 思考模型特殊处理
             if self._is_thinking_model(model):
@@ -293,6 +376,10 @@ class AIProviderService:
                     "model": model,
                     "messages": filtered_messages
                 }
+                
+                # 添加工具配置
+                if tools_config["tools"]:
+                    completion_params.update(tools_config)
                 
                 # 注意：reasoning_summaries 参数在当前 OpenAI API 版本中可能不被支持
                 # 如果需要支持该参数，请检查 OpenAI API 文档和库版本
@@ -310,6 +397,10 @@ class AIProviderService:
                     "messages": converted_messages,
                     "stream": stream
                 }
+                
+                # 添加工具配置
+                if tools_config["tools"]:
+                    completion_params.update(tools_config)
                 
                 # GPT-5 系列模型不支持自定义 temperature，使用默认值 1
                 if not self._is_gpt5_model(model):
@@ -387,22 +478,25 @@ class AIProviderService:
                         if role == "system":
                             instructions_text = content
                         else:
-                            # 获取图片数据
+                            # 获取图片和文件数据
                             images = None
+                            files = None
                             if isinstance(msg, dict):
                                 images = msg.get("images")
+                                files = msg.get("files")
                             else:
                                 images = getattr(msg, "images", None)
+                                files = getattr(msg, "files", None)
                             
+                            # 构造内容部分数组
+                            content_parts = []
+                            
+                            # 添加文本内容
+                            if content and content.strip():
+                                content_parts.append({"type": "input_text", "text": content})
+                            
+                            # 添加图片内容
                             if images and len(images) > 0:
-                                # 构造包含图片的输入格式
-                                content_parts = []
-                                
-                                # 添加文本内容
-                                if content and content.strip():
-                                    content_parts.append({"type": "input_text", "text": content})
-                                
-                                # 添加图片内容
                                 for image in images:
                                     if isinstance(image, dict):
                                         image_data = image.get("data")
@@ -416,17 +510,35 @@ class AIProviderService:
                                             "type": "input_image",
                                             "image_url": f"data:{mime_type};base64,{image_data}"
                                         })
-                                
-                                input_messages.append({
-                                    "role": role,
-                                    "content": content_parts
-                                })
-                            else:
-                                # 纯文本消息
-                                input_messages.append({
-                                    "role": role,
-                                    "content": [{"type": "input_text", "text": content}]
-                                })
+                            
+                            # 添加文件内容（仅支持 direct 模式的 PDF 文件）
+                            if files and len(files) > 0:
+                                for file in files:
+                                    if isinstance(file, dict):
+                                        openai_file_id = file.get("openai_file_id")
+                                        process_mode = file.get("process_mode", "direct")
+                                    else:
+                                        openai_file_id = getattr(file, "openai_file_id", None)
+                                        process_mode = getattr(file, "process_mode", "direct")
+                                    
+                                    # 只有 direct 模式的文件才添加到 input_file（仅支持 PDF）
+                                    if openai_file_id and process_mode == "direct":
+                                        content_parts.append({
+                                            "type": "input_file",
+                                            "file_id": openai_file_id
+                                        })
+                            
+                            # 如果没有内容部分，添加空文本
+                            if not content_parts:
+                                content_parts.append({"type": "input_text", "text": ""})
+                            
+                            input_messages.append({
+                                "role": role,
+                                "content": content_parts
+                            })
+                    
+                    # 准备工具配置
+                    tools_config = self._prepare_tools_config(messages)
                     
                     # 使用 Responses API 的多模态参数结构
                     completion_params = {
@@ -438,12 +550,23 @@ class AIProviderService:
                         }
                     }
                     
+                    # 添加工具配置
+                    if tools_config["tools"]:
+                        completion_params.update(tools_config)
+                        # 如果有工具且是必需的，设置 tool_choice
+                        need_code_interpreter = any(tool.get("type") == "code_interpreter" for tool in tools_config["tools"])
+                        if need_code_interpreter:
+                            completion_params["tool_choice"] = "required"
+                    
                     # 添加 instructions 如果有 system 消息
                     if instructions_text:
                         completion_params["instructions"] = instructions_text
                     
                     # GPT-5 系列模型使用 max_output_tokens
                     completion_params["max_output_tokens"] = 4000
+                    
+                    # 打印实际发送的 JSON
+                    logger.info(f"📤 发送给 OpenAI Responses API 的完整请求: {json.dumps(completion_params, ensure_ascii=False, indent=2)}")
                     
                     response = await asyncio.wait_for(
                         client.responses.create(**completion_params),
@@ -454,31 +577,111 @@ class AIProviderService:
                     logger.info(f"OpenAI Responses API调用成功（多模态支持）")
                     return self._convert_responses_to_chat_format(result)
                 
-                # 转换消息格式为 Responses API 所需的 input 格式（纯文本）
-                # Responses API 使用不同的参数结构，不接受 messages 参数
-                input_text = ""
+                # 转换消息格式为 Responses API 所需的 input 格式
+                # 检查是否有文件，如果有则使用结构化输入格式
+                has_files = any(
+                    (isinstance(msg, dict) and msg.get("files")) or
+                    (hasattr(msg, "files") and getattr(msg, "files", None))
+                    for msg in messages
+                )
+                
                 instructions_text = ""
                 
-                for msg in messages:
-                    role = self._get_message_attr(msg, "role")
-                    content = self._get_message_attr(msg, "content")
+                if has_files:
+                    # 使用结构化输入格式支持文件
+                    input_messages = []
                     
-                    if role == "system":
-                        instructions_text = content
-                    elif role == "user":
-                        input_text += f"{content}\n"
-                    elif role == "assistant":
-                        input_text += f"Assistant: {content}\n"
-                
-                # 使用 Responses API 参数结构
-                completion_params = {
-                    "model": model,
-                    "input": input_text.strip(),
-                    "reasoning": {
-                        "effort": reasoning,
-                        "summary": reasoning_summaries if reasoning_summaries != "auto" else "auto"
+                    for msg in messages:
+                        role = self._get_message_attr(msg, "role")
+                        content = self._get_message_attr(msg, "content")
+                        
+                        if role == "system":
+                            instructions_text = content
+                        else:
+                            # 获取文件数据
+                            files = None
+                            if isinstance(msg, dict):
+                                files = msg.get("files")
+                            else:
+                                files = getattr(msg, "files", None)
+                            
+                            # 构造内容部分数组
+                            content_parts = []
+                            
+                            # 添加文本内容
+                            if content and content.strip():
+                                content_parts.append({"type": "input_text", "text": content})
+                            
+                            # 添加文件内容（仅支持 direct 模式的 PDF 文件）
+                            if files and len(files) > 0:
+                                for file in files:
+                                    if isinstance(file, dict):
+                                        openai_file_id = file.get("openai_file_id")
+                                        process_mode = file.get("process_mode", "direct")
+                                    else:
+                                        openai_file_id = getattr(file, "openai_file_id", None)
+                                        process_mode = getattr(file, "process_mode", "direct")
+                                    
+                                    # 只有 direct 模式的文件才添加到 input_file（仅支持 PDF）
+                                    if openai_file_id and process_mode == "direct":
+                                        content_parts.append({
+                                            "type": "input_file",
+                                            "file_id": openai_file_id
+                                        })
+                            
+                            # 如果没有内容部分，添加空文本
+                            if not content_parts:
+                                content_parts.append({"type": "input_text", "text": ""})
+                            
+                            input_messages.append({
+                                "role": role,
+                                "content": content_parts
+                            })
+                    
+                    # 准备工具配置
+                    tools_config = self._prepare_tools_config(messages)
+                    
+                    # 使用结构化输入格式
+                    completion_params = {
+                        "model": model,
+                        "input": input_messages,
+                        "reasoning": {
+                            "effort": reasoning,
+                            "summary": reasoning_summaries if reasoning_summaries != "auto" else "auto"
+                        }
                     }
-                }
+                    
+                    # 添加工具配置
+                    if tools_config["tools"]:
+                        completion_params.update(tools_config)
+                        # 如果有工具且是必需的，设置 tool_choice
+                        need_code_interpreter = any(tool.get("type") == "code_interpreter" for tool in tools_config["tools"])
+                        if need_code_interpreter:
+                            completion_params["tool_choice"] = "required"
+                    
+                else:
+                    # 纯文本模式（保持向后兼容）
+                    input_text = ""
+                    
+                    for msg in messages:
+                        role = self._get_message_attr(msg, "role")
+                        content = self._get_message_attr(msg, "content")
+                        
+                        if role == "system":
+                            instructions_text = content
+                        elif role == "user":
+                            input_text += f"{content}\n"
+                        elif role == "assistant":
+                            input_text += f"Assistant: {content}\n"
+                    
+                    completion_params = {
+                        "model": model,
+                        "input": input_text.strip(),
+                        "reasoning": {
+                            "effort": reasoning,
+                            "summary": reasoning_summaries if reasoning_summaries != "auto" else "auto"
+                        }
+                    }
                 
                 # 添加 instructions 如果有 system 消息
                 if instructions_text:
@@ -487,7 +690,9 @@ class AIProviderService:
                 # GPT-5 系列模型使用 max_output_tokens (不是 max_completion_tokens)
                 completion_params["max_output_tokens"] = 4000
                 
-                logger.info(f"使用 Responses API 参数格式")
+                # 打印实际发送的 JSON
+                logger.info(f"📤 发送给 OpenAI Responses API 的完整请求: {json.dumps(completion_params, ensure_ascii=False, indent=2)}")
+                logger.info(f"使用 Responses API 参数格式{'（包含文件支持）' if has_files else '（纯文本模式）'}")
                 
                 # 调用 Responses API
                 try:
