@@ -1,6 +1,6 @@
 'use client'
 
-import { PlusIcon, ChatBubbleLeftIcon, Cog6ToothIcon, UserIcon, CubeIcon, PuzzlePieceIcon, SparklesIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, ChatBubbleLeftIcon, Cog6ToothIcon, UserIcon, CubeIcon, PuzzlePieceIcon, SparklesIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { useChatStore } from '@/store/chatStore'
 import { Button } from '@/components/ui/button'
 import { Conversation } from '@/lib/types'
@@ -9,13 +9,20 @@ interface ChatSidebarProps {
   onSettingsClick: () => void
   onLoginClick: () => void
   onModelMarketClick?: () => void
+  onPluginMarketClick?: () => void
+  onDeepResearchClick?: () => void
+  onBackToChat?: () => void // 新增：返回聊天的回调
 }
 
-export default function ChatSidebar({ onSettingsClick, onLoginClick, onModelMarketClick }: ChatSidebarProps) {
+export default function ChatSidebar({ onSettingsClick, onLoginClick, onModelMarketClick, onPluginMarketClick, onDeepResearchClick, onBackToChat }: ChatSidebarProps) {
   const { conversations, currentConversationId, createNewConversation, setCurrentConversation, deleteConversation } = useChatStore()
 
   const handleNewChat = () => {
     createNewConversation()
+    // 如果在深度研究页面，返回聊天页面
+    if (onBackToChat) {
+      onBackToChat()
+    }
   }
 
   const handleModelMarketClick = () => {
@@ -25,8 +32,15 @@ export default function ChatSidebar({ onSettingsClick, onLoginClick, onModelMark
   }
 
   const handlePluginMarketClick = () => {
-    // TODO: 打开插件市场浮窗
-    console.log('打开插件市场')
+    if (onPluginMarketClick) {
+      onPluginMarketClick()
+    }
+  }
+
+  const handleDeepResearchClick = () => {
+    if (onDeepResearchClick) {
+      onDeepResearchClick()
+    }
   }
 
   const formatDate = (date: Date) => {
@@ -82,6 +96,17 @@ export default function ChatSidebar({ onSettingsClick, onLoginClick, onModelMark
         </button>
       </div>
 
+      {/* 深度研究按钮 */}
+      <div className="px-4 pb-2 animate-in fade-in-0 slide-in-from-left-2 duration-300 delay-175">
+        <button
+          onClick={handleDeepResearchClick}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-all duration-200 text-left hover:scale-105 hover:translate-x-1 group"
+        >
+          <MagnifyingGlassIcon className="w-4 h-4 text-green-500 transition-transform duration-200 group-hover:rotate-12" />
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">深度研究</span>
+        </button>
+      </div>
+
       {/* 设置按钮 */}
       <div className="px-4 pb-4 animate-in fade-in-0 slide-in-from-left-2 duration-300 delay-200">
         <button
@@ -107,7 +132,13 @@ export default function ChatSidebar({ onSettingsClick, onLoginClick, onModelMark
             {(convs as Conversation[]).map((conversation, convIndex) => (
               <div
                 key={conversation.id}
-                onClick={() => setCurrentConversation(conversation.id)}
+                onClick={() => {
+                  setCurrentConversation(conversation.id)
+                  // 如果在深度研究页面，返回聊天页面
+                  if (onBackToChat) {
+                    onBackToChat()
+                  }
+                }}
                 className={`
                   flex items-center gap-2 p-2 rounded-lg cursor-pointer group transition-all duration-200 animate-in fade-in-0 slide-in-from-right-2
                   ${currentConversationId === conversation.id 

@@ -4,13 +4,17 @@ import { useState, useEffect } from 'react'
 import ChatSidebar from '@/components/chat/ChatSidebar'
 import ChatMain from '@/components/chat/ChatMain'
 import SettingsDialog from '@/components/settings/SettingsDialog'
-import ModelMarket from '@/components/ui/ModelMarket'  // 添加这行
+import ModelMarket from '@/components/ui/ModelMarket'
+import PluginMarket from '@/components/ui/PluginMarket'
+import DeepResearchPage from '@/components/deep-research/DeepResearchPage'
 import { useSettingsStore } from '@/store/settingsStore'
 
 export default function Home() {
   const [showSettings, setShowSettings] = useState(false)
   const [showLogin, setShowLogin] = useState(false)
-  const [showModelMarket, setShowModelMarket] = useState(false)  // 确保这行存在
+  const [showModelMarket, setShowModelMarket] = useState(false)
+  const [showPluginMarket, setShowPluginMarket] = useState(false)
+  const [currentView, setCurrentView] = useState<'chat' | 'deep-research'>('chat')
   const { initialized, initializeSettings } = useSettingsStore()
 
   useEffect(() => {
@@ -23,6 +27,14 @@ export default function Home() {
     setShowModelMarket(true)
   }
 
+  const handlePluginMarketClick = () => {
+    setShowPluginMarket(true)
+  }
+
+  const handleDeepResearchClick = () => {
+    setCurrentView('deep-research')
+  }
+
   return (
     <div className="flex h-screen bg-white dark:bg-gray-900 overflow-hidden">
       {/* 桌面端侧边栏 - 移动端隐藏 */}
@@ -31,16 +43,29 @@ export default function Home() {
           onSettingsClick={() => setShowSettings(true)}
           onLoginClick={() => setShowLogin(true)}
           onModelMarketClick={handleModelMarketClick}
+          onPluginMarketClick={handlePluginMarketClick}
+          onDeepResearchClick={handleDeepResearchClick}
+          onBackToChat={currentView === 'deep-research' ? () => setCurrentView('chat') : undefined}
         />
       </div>
       
-      {/* 主聊天区域 */}
+      {/* 主内容区域 */}
       <div className="flex-1 min-w-0">
-        <ChatMain 
-          onModelMarketClick={handleModelMarketClick}
-          onSettingsClick={() => setShowSettings(true)}
-          onLoginClick={() => setShowLogin(true)}
-        />
+        {currentView === 'chat' ? (
+          <ChatMain 
+            onModelMarketClick={handleModelMarketClick}
+            onSettingsClick={() => setShowSettings(true)}
+            onLoginClick={() => setShowLogin(true)}
+            onDeepResearchClick={handleDeepResearchClick}
+          />
+        ) : (
+          <DeepResearchPage 
+            onBackToChat={() => setCurrentView('chat')} 
+            onSettingsClick={() => setShowSettings(true)}
+            onLoginClick={() => setShowLogin(true)}
+            onModelMarketClick={handleModelMarketClick}
+          />
+        )}
       </div>
       
       {/* 设置对话框 */}
@@ -52,6 +77,12 @@ export default function Home() {
       <ModelMarket 
         isOpen={showModelMarket}
         onClose={() => setShowModelMarket(false)}
+      />
+      
+      {/* 插件市场弹窗 */}
+      <PluginMarket 
+        isOpen={showPluginMarket}
+        onClose={() => setShowPluginMarket(false)}
       />
     </div>
   )
