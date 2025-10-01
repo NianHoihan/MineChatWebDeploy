@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { PaperAirplaneIcon, PaperClipIcon, StopIcon } from '@heroicons/react/24/outline'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import DeepResearchModelSelector from './DeepResearchModelSelector'
 import DeepResearchTaskList from './DeepResearchTaskList'
 import DeepResearchHeader from './DeepResearchHeader'
@@ -54,22 +56,67 @@ export default function DeepResearchPage({ onBackToChat, onSettingsClick, onLogi
     setIsSidebarOpen(false)
   }
 
+  // 从localStorage加载任务
+  const loadTasksFromLocalStorage = (): DeepResearchTask[] => {
+    try {
+      const storedTasks = localStorage.getItem('deepResearchTasks')
+      if (storedTasks) {
+        return JSON.parse(storedTasks)
+      }
+    } catch (error) {
+      console.error('从localStorage加载任务失败:', error)
+    }
+    return []
+  }
+
+  // 保存任务到localStorage
+  const saveTasksToLocalStorage = (tasksToSave: DeepResearchTask[]) => {
+    try {
+      localStorage.setItem('deepResearchTasks', JSON.stringify(tasksToSave))
+    } catch (error) {
+      console.error('保存任务到localStorage失败:', error)
+    }
+  }
+
+  // 自动保存任务到localStorage
+  useEffect(() => {
+    if (tasks.length > 0) {
+      saveTasksToLocalStorage(tasks)
+    }
+  }, [tasks])
+
   // 初始化WebSocket和加载任务
   useEffect(() => {
     const initializeService = async () => {
       try {
-        // 连接WebSocket
-        await deepResearchService.connectWebSocket()
+        // 1. 先从localStorage恢复任务（即时显示）
+        const localTasks = loadTasksFromLocalStorage()
+        if (localTasks.length > 0) {
+          setTasks(localTasks)
+          console.log(`从localStorage恢复了 ${localTasks.length} 个任务`)
 
-        // 加载现有任务
+          // 为正在运行或警告状态的任务重新订阅更新
+          localTasks.forEach(task => {
+            if (task.status === 'running' || task.status === 'warning') {
+              const pollInterval = subscribeToTaskUpdates(task.id)
+              pollIntervalsRef.current.set(task.id, pollInterval)
+              console.log(`重新订阅任务 ${task.id} 的状态更新`)
+            }
+          })
+        }
+
+        // 2. 连接WebSocket（静默失败，不影响功能使用）
+        await deepResearchService.connectWebSocket().catch((wsError) => {
+          // WebSocket连接失败不影响主要功能，因为有轮询机制兜底
+          console.log('WebSocket连接失败，将使用轮询方式获取任务状态:', wsError.message)
+        })
+
+        // 3. 从后端加载任务并合并更新
         await loadTasks()
       } catch (error) {
-        console.error('初始化深度研究服务时出错:', error?.message || error)
-        // 只在WebSocket连接失败时显示错误，任务加载失败可以忽略
-        const errorMessage = error instanceof Error ? error.message : '连接服务失败'
-        if (errorMessage.includes('WebSocket') || errorMessage.includes('连接')) {
-          setError('WebSocket连接失败，但功能仍可正常使用')
-        }
+        console.error('初始化深度研究服务时出错:', error)
+        // 只有在加载任务列表失败时才显示错误
+        // WebSocket连接失败不影响使用，因为有轮询机制
       }
     }
 
@@ -87,14 +134,35 @@ export default function DeepResearchPage({ onBackToChat, onSettingsClick, onLogi
     }
   }, [])
 
-  // 加载任务列表
+  // 加载任务列表（合并本地和远程数据）
   const loadTasks = async () => {
     try {
       const response = await deepResearchService.getTasks(50, 0)
-      setTasks(response.tasks)
+
+      // 合并远程任务和本地任务
+      setTasks(prevTasks => {
+        const remoteTasks = response.tasks
+        const taskMap = new Map<string, DeepResearchTask>()
+
+        // 先添加本地任务
+        prevTasks.forEach(task => {
+          taskMap.set(task.id, task)
+        })
+
+        // 用远程任务更新（远程数据优先，因为是最新状态）
+        remoteTasks.forEach(task => {
+          taskMap.set(task.id, task)
+        })
+
+        // 转换为数组并按创建时间排序
+        return Array.from(taskMap.values()).sort((a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+      })
     } catch (error) {
       console.error('加载任务列表失败:', error)
-      // 不显示错误，因为可能是第一次使用
+      // 不显示错误，因为可能是第一次使用或网络问题
+      // 本地数据仍然可用
     }
   }
 
@@ -127,6 +195,8 @@ export default function DeepResearchPage({ onBackToChat, onSettingsClick, onLogi
           // 如果任务已完成或失败，停止轮询
           if (updatedTask.status === 'completed' || updatedTask.status === 'failed') {
             clearInterval(pollInterval)
+            pollIntervalsRef.current.delete(taskId)
+            console.log(`任务 ${taskId} 已完成，停止轮询`)
           }
         }
       } catch (error) {
@@ -333,8 +403,10 @@ export default function DeepResearchPage({ onBackToChat, onSettingsClick, onLogi
                     {currentTask.result && (
                       <div className="bg-gray-50 dark:bg-gray-700 rounded-2xl p-6">
                         <h3 className="font-semibold text-gray-900 dark:text-white mb-4 text-lg">研究结果（可能不完整）</h3>
-                        <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
-                          {currentTask.result}
+                        <div className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {currentTask.result}
+                          </ReactMarkdown>
                         </div>
                       </div>
                     )}
@@ -342,8 +414,10 @@ export default function DeepResearchPage({ onBackToChat, onSettingsClick, onLogi
                 ) : currentTask.status === 'completed' ? (
                   <div className="bg-gray-50 dark:bg-gray-700 rounded-2xl p-6">
                     <h3 className="font-semibold text-gray-900 dark:text-white mb-4 text-lg">研究结果</h3>
-                    <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
-                      {currentTask.result}
+                    <div className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {currentTask.result}
+                      </ReactMarkdown>
                     </div>
                   </div>
                 ) : (
@@ -409,8 +483,10 @@ export default function DeepResearchPage({ onBackToChat, onSettingsClick, onLogi
                   {currentTask.result && (
                     <div className="bg-gray-50 dark:bg-gray-700 rounded-2xl p-6">
                       <h3 className="font-semibold text-gray-900 dark:text-white mb-4 text-lg">研究结果（可能不完整）</h3>
-                      <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
-                        {currentTask.result}
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {currentTask.result}
+                        </ReactMarkdown>
                       </div>
                     </div>
                   )}
@@ -418,8 +494,10 @@ export default function DeepResearchPage({ onBackToChat, onSettingsClick, onLogi
               ) : currentTask.status === 'completed' ? (
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-2xl p-6">
                   <h3 className="font-semibold text-gray-900 dark:text-white mb-4 text-lg">研究结果</h3>
-                  <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
-                    {currentTask.result}
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {currentTask.result}
+                    </ReactMarkdown>
                   </div>
                 </div>
               ) : (
