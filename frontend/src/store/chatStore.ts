@@ -61,7 +61,8 @@ export const useChatStore = create<ChatState>()(
           title: '新对话',
           messages: [],
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          isLoading: false
         }
 
         set(state => ({
@@ -92,10 +93,11 @@ export const useChatStore = create<ChatState>()(
         const { abortController } = get()
         if (abortController) {
           abortController.abort()
-          set({ isLoading: false, abortController: null })
         }
-        // Also cleanup WebSocket if active
+        // Cleanup WebSocket if active
         get()._cleanupWebSocket()
+        // Always reset loading state
+        set({ isLoading: false, abortController: null })
       },
 
       _createWebSocketConnection: async (url: string): Promise<WebSocket> => {
@@ -233,11 +235,12 @@ export const useChatStore = create<ChatState>()(
                   ...conv,
                   messages: [...conv.messages, userMessage, assistantMessage],
                   title: conv.messages.length === 0 ? content.slice(0, 20) + '...' : conv.title,
-                  updated_at: new Date().toISOString()
+                  updated_at: new Date().toISOString(),
+                  isLoading: true  // 设置当前对话为加载中
                 }
               : conv
           ),
-          isLoading: true
+          isLoading: true  // 保持全局isLoading用于兼容
         }))
 
         // 检查模型是否支持流式输出
@@ -416,7 +419,15 @@ export const useChatStore = create<ChatState>()(
                   // 如果流式传输完成
                   if (chunk.choices && chunk.choices[0]?.finish_reason) {
                     get()._cleanupWebSocket()
-                    set({ isLoading: false, abortController: null })
+                    set(state => ({
+                      conversations: state.conversations.map(conv =>
+                        conv.id === targetConversationId
+                          ? { ...conv, isLoading: false }
+                          : conv
+                      ),
+                      isLoading: false,
+                      abortController: null
+                    }))
                   }
                 } catch (error) {
                   console.error('解析流式响应失败:', error)
@@ -482,8 +493,16 @@ export const useChatStore = create<ChatState>()(
         } catch (error: any) {
           console.error('流式发送消息失败:', error)
           get()._cleanupWebSocket()
-          set({ isLoading: false, abortController: null })
-          
+          set(state => ({
+            conversations: state.conversations.map(conv =>
+              conv.id === targetConversationId
+                ? { ...conv, isLoading: false }
+                : conv
+            ),
+            isLoading: false,
+            abortController: null
+          }))
+
           // Final fallback to HTTP
           try {
             console.log('尝试HTTP fallback')
@@ -634,11 +653,12 @@ export const useChatStore = create<ChatState>()(
                         : msg
                     ),
                     title: conv.messages.length <= 2 ? content.slice(0, 20) + '...' : conv.title,
-                    updated_at: new Date().toISOString()
+                    updated_at: new Date().toISOString(),
+                    isLoading: false  // HTTP响应完成，重置对话的加载状态
                   }
                 : conv
             )
-            
+
             return {
               conversations: newConversations,
               isLoading: false,
@@ -680,11 +700,19 @@ export const useChatStore = create<ChatState>()(
 
         } catch (error: any) {
           console.error('发送消息失败:', error)
-          set({ isLoading: false, abortController: null })
-          
+          set(state => ({
+            conversations: state.conversations.map(conv =>
+              conv.id === targetConversationId
+                ? { ...conv, isLoading: false }
+                : conv
+            ),
+            isLoading: false,
+            abortController: null
+          }))
+
           // 使用工具函数格式化错误
           const formattedError = formatWebSearchError(error)
-          
+
           throw new Error(formattedError.message)
         }
       },
